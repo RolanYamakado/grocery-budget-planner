@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #fbf6ef;
+  --color-terracotta: #c2703d;
+  --color-terracotta-dark: #a85a2c;
+  --color-olive: #6b7a4f;
+  --color-olive-dark: #55613f;
+  --shadow-warm: 0 8px 24px -4px rgb(194 112 61 / 0.18);
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--color-cream);
+}
+
+#root {
+  min-height: 100svh;
+}
+
+@media print {
+  .print\:hidden {
+    display: none !important;
+  }
+}
