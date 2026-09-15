@@ -31,6 +31,9 @@ export const MAX_MEALS_PER_WEEK = 99;
 
 export const PLAN_HISTORY_LIMIT = 8;
 
+/** Unbounded history would grow the per-write sync payload forever once synced to a server. */
+export const SWIPE_HISTORY_LIMIT = 500;
+
 export const LEFTOVER_LOOKBACK_DAYS = 14;
 
 /**

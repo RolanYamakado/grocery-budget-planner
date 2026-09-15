@@ -1,6 +1,7 @@
 import { useAppView } from '../../hooks/useAppView';
 import { usePlanState } from '../../hooks/usePlanState';
 import { useCustomCart } from '../../hooks/useCustomCart';
+import { useAuth } from '../../hooks/useAuth';
 import clsx from 'clsx';
 
 const NAV_ITEMS = [
@@ -13,6 +14,7 @@ export function TopNav() {
   const { view, goToWizard, goToSavedPlans, goToRecipeSearch } = useAppView();
   const { restart } = usePlanState();
   const cart = useCustomCart();
+  const { user, signOut } = useAuth();
 
   function handleClick(target: (typeof NAV_ITEMS)[number]['view']) {
     if (target === 'wizard') {
@@ -42,6 +44,12 @@ export function TopNav() {
             {item.label}
           </button>
         ))}
+      </div>
+      <div className="mx-auto flex max-w-md items-center justify-center gap-2 px-4 pb-2 text-xs text-stone-400">
+        <span className="truncate">{user?.email}</span>
+        <button type="button" onClick={() => void signOut()} className="shrink-0 font-semibold hover:underline">
+          Sign out
+        </button>
       </div>
     </nav>
   );

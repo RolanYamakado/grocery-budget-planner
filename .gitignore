@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment variables (secrets) — .env.local already matched by *.local above,
+# but be explicit. .env.example is intentionally committed as a template.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,6 +1,8 @@
 import { usePlanState, PlanProvider } from './hooks/usePlanState';
 import { AppViewProvider, useAppView } from './hooks/useAppView';
 import { CustomCartProvider } from './hooks/useCustomCart';
+import { AuthProvider, useAuth } from './hooks/useAuth';
+import { AuthScreen } from './pages/AuthScreen';
 import { TopNav } from './components/nav/TopNav';
 import { SetupScreen } from './pages/SetupScreen';
 import { SwipeScreen } from './pages/SwipeScreen';
@@ -47,9 +49,25 @@ function AppRouter() {
   }
 }
 
-function App() {
+function AuthGate() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-cream text-stone-500">Loading…</div>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
+  // Keyed by user.id so switching accounts in the same tab fully remounts the
+  // wizard/cart state — otherwise account B could inherit account A's
+  // in-progress selections after storage.clearSync() only wipes storage.ts's
+  // own cache, not this React state.
   return (
-    <AppViewProvider>
+    <AppViewProvider key={user.id}>
       <CustomCartProvider>
         <PlanProvider>
           <div className="min-h-svh bg-cream">
@@ -59,6 +77,14 @@ function App() {
         </PlanProvider>
       </CustomCartProvider>
     </AppViewProvider>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }
 

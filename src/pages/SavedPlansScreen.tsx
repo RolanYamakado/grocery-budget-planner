@@ -18,8 +18,8 @@ export function SavedPlansScreen() {
   const { goToSavedPlanDetail, goToWizard } = useAppView();
   const [plans, setPlans] = useState(() => getPlanHistory());
 
-  function handleDelete(planId: string) {
-    removePlanFromHistory(planId);
+  async function handleDelete(planId: string) {
+    await removePlanFromHistory(planId);
     setPlans(getPlanHistory());
   }
 
@@ -45,7 +45,7 @@ export function SavedPlansScreen() {
               <button
                 type="button"
                 aria-label="Delete saved plan"
-                onClick={() => handleDelete(plan.id)}
+                onClick={() => void handleDelete(plan.id)}
                 className="shrink-0 rounded-full border border-red-200 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
               >
                 Remove

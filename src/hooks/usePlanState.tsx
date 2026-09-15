@@ -72,11 +72,18 @@ interface PlanState {
   lastSwipe: SwipeSnapshot | null;
 }
 
+// Note: no `storage.ts` call ever originates inside the reducer, for reads or
+// writes — SWIPE_REJECT/SWIPE_ACCEPT/UNDO_SWIPE receive already-computed
+// affinityScores from the PlanProvider callback that dispatches them (mirroring
+// how `savePlan` already lived outside the reducer). This matters even beyond
+// the new async Supabase sync: React can invoke a reducer function twice per
+// dispatch (Strict Mode), and a persistence side effect inside a reducer isn't
+// safe to assume runs exactly once.
 type Action =
   | { type: 'START_PLAN'; payload: SetupPayload }
   | { type: 'START_CUSTOM_PLAN'; payload: SetupPayload; selections: WeeklyPlanRecipeSelection[] }
-  | { type: 'SWIPE_REJECT'; recipeId: string }
-  | { type: 'SWIPE_ACCEPT'; recipeId: string; mealCount: number }
+  | { type: 'SWIPE_REJECT'; affinityScores: AffinityScores }
+  | { type: 'SWIPE_ACCEPT'; recipeId: string; mealCount: number; affinityScores: AffinityScores }
   | { type: 'UNDO_SWIPE' }
   | { type: 'ADD_MEAL_ASSIGNMENT'; date: string; recipeId: string }
   | { type: 'REMOVE_MEAL_ASSIGNMENT'; assignmentId: string }
@@ -194,21 +201,13 @@ function reducer(state: PlanState, action: Action): PlanState {
       };
     }
     case 'SWIPE_REJECT': {
-      const recipe = RECIPES_BY_ID[action.recipeId];
-      if (!recipe) return state;
       const lastSwipe = snapshotForUndo(state);
-      appendSwipeHistory({ recipeId: recipe.id, action: 'reject', timestamp: new Date().toISOString() });
-      const affinityScores = updateAffinity(state.affinityScores, recipe, 'reject');
-      saveAffinityScores(affinityScores);
-      return { ...state, affinityScores, deckIndex: state.deckIndex + 1, lastSwipe };
+      return { ...state, affinityScores: action.affinityScores, deckIndex: state.deckIndex + 1, lastSwipe };
     }
     case 'SWIPE_ACCEPT': {
       const recipe = RECIPES_BY_ID[action.recipeId];
       if (!recipe || !state.setup) return state;
       const lastSwipe = snapshotForUndo(state);
-      appendSwipeHistory({ recipeId: recipe.id, action: 'accept', timestamp: new Date().toISOString() });
-      const affinityScores = updateAffinity(state.affinityScores, recipe, 'accept');
-      saveAffinityScores(affinityScores);
       const selections = [...state.selections, { recipeId: recipe.id, mealCount: action.mealCount }];
       const runningTotal = state.runningTotal + action.mealCount;
       const mealsTarget = state.setup?.mealsTarget ?? MAX_MEALS_PER_WEEK;
@@ -216,7 +215,7 @@ function reducer(state: PlanState, action: Action): PlanState {
       const planDates = getPlanDates(state.setup.weekStart);
       return {
         ...state,
-        affinityScores,
+        affinityScores: action.affinityScores,
         selections,
         runningTotal,
         deckIndex: state.deckIndex + 1,
@@ -227,8 +226,6 @@ function reducer(state: PlanState, action: Action): PlanState {
     }
     case 'UNDO_SWIPE': {
       if (!state.lastSwipe) return state;
-      popLastSwipeHistory();
-      saveAffinityScores(state.lastSwipe.affinityScores);
       return {
         ...state,
         affinityScores: state.lastSwipe.affinityScores,
@@ -341,7 +338,7 @@ interface PlanContextValue {
   moveMealAssignment: (assignmentId: string, newDate: string) => void;
   goToReview: () => void;
   confirmResults: () => void;
-  savePlan: () => void;
+  savePlan: () => Promise<void>;
   restart: () => void;
 }
 
@@ -356,12 +353,36 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'START_CUSTOM_PLAN', payload, selections }),
     [],
   );
-  const swipeReject = useCallback((recipeId: string) => dispatch({ type: 'SWIPE_REJECT', recipeId }), []);
-  const swipeAccept = useCallback(
-    (recipeId: string, mealCount: number) => dispatch({ type: 'SWIPE_ACCEPT', recipeId, mealCount }),
-    [],
+  // Swipe/affinity/history side effects live here, outside the reducer — see the
+  // comment on the `Action` type above for why.
+  const swipeReject = useCallback(
+    (recipeId: string) => {
+      const recipe = RECIPES_BY_ID[recipeId];
+      if (!recipe) return;
+      appendSwipeHistory({ recipeId: recipe.id, action: 'reject', timestamp: new Date().toISOString() });
+      const affinityScores = updateAffinity(state.affinityScores, recipe, 'reject');
+      saveAffinityScores(affinityScores);
+      dispatch({ type: 'SWIPE_REJECT', affinityScores });
+    },
+    [state.affinityScores],
   );
-  const undoSwipe = useCallback(() => dispatch({ type: 'UNDO_SWIPE' }), []);
+  const swipeAccept = useCallback(
+    (recipeId: string, mealCount: number) => {
+      const recipe = RECIPES_BY_ID[recipeId];
+      if (!recipe) return;
+      appendSwipeHistory({ recipeId: recipe.id, action: 'accept', timestamp: new Date().toISOString() });
+      const affinityScores = updateAffinity(state.affinityScores, recipe, 'accept');
+      saveAffinityScores(affinityScores);
+      dispatch({ type: 'SWIPE_ACCEPT', recipeId, mealCount, affinityScores });
+    },
+    [state.affinityScores],
+  );
+  const undoSwipe = useCallback(() => {
+    if (!state.lastSwipe) return;
+    popLastSwipeHistory();
+    saveAffinityScores(state.lastSwipe.affinityScores);
+    dispatch({ type: 'UNDO_SWIPE' });
+  }, [state.lastSwipe]);
   const addMealAssignment = useCallback(
     (date: string, recipeId: string) => dispatch({ type: 'ADD_MEAL_ASSIGNMENT', date, recipeId }),
     [],
@@ -380,12 +401,9 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   );
   const goToReview = useCallback(() => dispatch({ type: 'GO_TO_REVIEW' }), []);
   const confirmResults = useCallback(() => dispatch({ type: 'CONFIRM_RESULTS' }), []);
-  // Side effect (localStorage write) lives here, outside the reducer, since reducers
-  // must stay pure — React can invoke a reducer twice for the same action (e.g. Strict
-  // Mode) without that being safe to assume for a real persistence write.
-  const savePlan = useCallback(() => {
+  const savePlan = useCallback(async () => {
     if (state.finalPlan) {
-      savePlanToHistory(state.finalPlan);
+      await savePlanToHistory(state.finalPlan);
       dispatch({ type: 'MARK_SAVED' });
     }
   }, [state.finalPlan]);
