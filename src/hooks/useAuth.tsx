@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
@@ -19,6 +19,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  // Tracks which user id we've already hydrated sync for. Supabase re-fires
+  // onAuthStateChange (e.g. a token refresh when the tab regains focus after
+  // being backgrounded) with the *same* signed-in user — without this guard,
+  // that re-fire would flip `loading` back to true, which unmounts the whole
+  // authenticated subtree (including PlanProvider) below and wipes any
+  // in-progress wizard state. A ref (not state) survives across the effect's
+  // single run without retriggering it.
+  const syncedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const sessionUser = data.session?.user ?? null;
       if (sessionUser) {
         await initSyncForUser(sessionUser.id);
+        syncedUserIdRef.current = sessionUser.id;
       }
       if (!cancelled) {
         setUser(sessionUser);
@@ -40,12 +49,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       const nextUser = session?.user ?? null;
       if (nextUser) {
+        if (syncedUserIdRef.current === nextUser.id) {
+          setUser(nextUser);
+          return;
+        }
         setLoading(true);
         await initSyncForUser(nextUser.id);
         if (cancelled) return;
+        syncedUserIdRef.current = nextUser.id;
         setUser(nextUser);
         setLoading(false);
       } else {
+        syncedUserIdRef.current = null;
         clearSync();
         setUser(null);
         setLoading(false);

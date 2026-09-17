@@ -21,22 +21,39 @@ const DIET_OPTIONS: { value: DietTag; label: string }[] = [
   { value: 'high-fibre', label: 'High-fibre' },
 ];
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 export function SetupScreen() {
   const { startPlan, startCustomPlan } = usePlanState();
   const cart = useCustomCart();
   const isCustom = cart.selections.length > 0;
 
   const [weekStart, setWeekStart] = useState<Date | null>(new Date());
-  const [budget, setBudget] = useState(40);
+  // Kept as strings, not numbers — a number-typed value forces the input to
+  // display "0" the instant backspace empties it (React can't render an
+  // empty numeric state as ""), which also snaps the cursor to the end.
+  // Typing stays a free-form string; values are parsed/clamped on blur and
+  // again just before submit.
+  const [budget, setBudget] = useState('40');
   const [region, setRegion] = useState<Region>('rest-of-uk');
   const [stores, setStores] = useState<StoreId[]>(['tesco']);
   const [pricingStrategy, setPricingStrategy] = useState<PricingStrategy>('cheapest');
-  const [mealsTarget, setMealsTarget] = useState(5);
-  const [servingsPerMeal, setServingsPerMeal] = useState(2);
+  const [mealsTarget, setMealsTarget] = useState('5');
+  const [servingsPerMeal, setServingsPerMeal] = useState('2');
   const [dietPreference, setDietPreference] = useState<DietTag>('balanced');
 
+  const budgetValue = Number(budget) || 0;
+  const mealsTargetValue = Number(mealsTarget) || 0;
+  const servingsPerMealValue = Number(servingsPerMeal) || 0;
+
   const canSubmit =
-    weekStart !== null && budget > 0 && stores.length > 0 && servingsPerMeal > 0 && (isCustom || mealsTarget > 0);
+    weekStart !== null &&
+    budgetValue > 0 &&
+    stores.length > 0 &&
+    servingsPerMealValue > 0 &&
+    (isCustom || mealsTargetValue > 0);
 
   function toggleStore(id: StoreId) {
     setStores((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
@@ -44,16 +61,19 @@ export function SetupScreen() {
 
   function handleSubmit() {
     if (!weekStart) return;
+    const finalBudget = Math.max(1, budgetValue);
+    const finalServingsPerMeal = clamp(servingsPerMealValue || 1, 1, 10);
+    const finalMealsTarget = clamp(mealsTargetValue || 1, 1, MAX_MEALS_PER_WEEK);
     if (isCustom) {
       startCustomPlan(
         {
           weekStart,
-          budgetGBP: budget,
+          budgetGBP: finalBudget,
           region,
           stores,
           pricingStrategy,
           mealsTarget: cart.totalMeals,
-          servingsPerMeal,
+          servingsPerMeal: finalServingsPerMeal,
           dietPreference,
         },
         cart.selections,
@@ -61,7 +81,16 @@ export function SetupScreen() {
       cart.clear();
       return;
     }
-    startPlan({ weekStart, budgetGBP: budget, region, stores, pricingStrategy, mealsTarget, servingsPerMeal, dietPreference });
+    startPlan({
+      weekStart,
+      budgetGBP: finalBudget,
+      region,
+      stores,
+      pricingStrategy,
+      mealsTarget: finalMealsTarget,
+      servingsPerMeal: finalServingsPerMeal,
+      dietPreference,
+    });
   }
 
   return (
@@ -130,7 +159,8 @@ export function SetupScreen() {
             min={1}
             step={1}
             value={budget}
-            onChange={(e) => setBudget(Number(e.target.value))}
+            onChange={(e) => setBudget(e.target.value)}
+            onBlur={() => setBudget((prev) => (prev === '' || Number(prev) < 1 ? '1' : String(Math.floor(Number(prev)))))}
             className="w-full rounded-xl border border-stone-300 px-3 py-2"
           />
         </section>
@@ -145,7 +175,8 @@ export function SetupScreen() {
             min={1}
             max={10}
             value={servingsPerMeal}
-            onChange={(e) => setServingsPerMeal(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+            onChange={(e) => setServingsPerMeal(e.target.value)}
+            onBlur={() => setServingsPerMeal((prev) => String(clamp(Number(prev) || 1, 1, 10)))}
             className="w-full rounded-xl border border-stone-300 px-3 py-2"
           />
           <p className="mt-1 text-xs text-stone-500">Scales how much of each ingredient you'll need to buy.</p>
@@ -204,9 +235,8 @@ export function SetupScreen() {
               min={1}
               max={MAX_MEALS_PER_WEEK}
               value={mealsTarget}
-              onChange={(e) =>
-                setMealsTarget(Math.max(1, Math.min(MAX_MEALS_PER_WEEK, Number(e.target.value) || 1)))
-              }
+              onChange={(e) => setMealsTarget(e.target.value)}
+              onBlur={() => setMealsTarget((prev) => String(clamp(Number(prev) || 1, 1, MAX_MEALS_PER_WEEK)))}
               className="w-full rounded-xl border border-stone-300 px-3 py-2"
             />
           </section>
